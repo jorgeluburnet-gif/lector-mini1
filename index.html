@@ -45,6 +45,12 @@
         <div id="loadingStatus" class="text-center p-2 bg-yellow-100 text-yellow-800 rounded-lg mb-4 text-sm">
             Cargando inventario...
         </div>
+        
+        <!-- Mensaje de Error de Configuración de Firebase -->
+        <div id="configError" class="text-center p-2 bg-red-100 text-red-800 rounded-lg mb-4 text-sm hidden">
+             Error de configuración. Por favor, revisa la consola para ver los detalles del error.
+        </div>
+
 
         <!-- Formulario de Entrada -->
         <div class="space-y-4">
@@ -59,14 +65,6 @@
                     class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-lg transition duration-300 ease-in-out transform hover:scale-[1.01] shadow-md hover:shadow-lg">
                 Buscar Producto
             </button>
-            
-            <!-- Botón de URL oculto, ya que la guía explica la publicación externa -->
-            <!-- Ya no se necesita esta función aquí ya que se explica la publicación externa.
-            <button onclick="showMyUrl()"
-                    class="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition duration-300 ease-in-out transform hover:scale-[1.01] shadow-md hover:shadow-lg mt-2">
-                Mostrar mi URL para el Móvil
-            </button>
-            -->
         </div>
         
         <!-- Área de Resultados -->
@@ -153,26 +151,38 @@
     <script type="module">
         // Importaciones de Firebase SDK (requeridas para la DB en tiempo real)
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, query, runTransaction, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Establecer el nivel de log para depuración de Firestore
         setLogLevel('Debug');
-
-        // Variables Globales de Firebase (PROPORCIONADAS POR EL ENTORNO)
-        // NOTA: Estas variables son necesarias para la conexión con la base de datos de Google.
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        // Inicialización de Firebase
+        
+        // ======================================================================
+        // CONFIGURACIÓN DE FIREBASE (INSERTADA POR EL ASISTENTE)
+        // ======================================================================
+        const customFirebaseConfig = {
+            apiKey: "AIzaSyD2ZIrZvc2crbt7Wqfx6j500yfSyj95870", 
+            authDomain: "lector-minimarket.firebaseapp.com",
+            projectId: "lector-minimarket", 
+            storageBucket: "lector-minimarket.firebasestorage.app", 
+            messagingSenderId: "154993425446", 
+            appId: "1:154993425446:web:c7dda09846cbd494a3bae7" 
+            // measurementId no es necesario para la conexión de DB y Auth
+        };
+        // ID de la aplicación. Usamos el projectId de Firebase como identificador principal.
+        const appId = customFirebaseConfig.projectId; 
+        
+        const firebaseConfig = customFirebaseConfig;
+        // ----------------------------------------------------------------------
+        
         let app;
         let db;
         let auth;
         let userId = 'loading';
-        let inventoryData = {}; // Objeto que contendrá los datos del inventario de Firestore
+        let inventoryData = {}; 
 
         const loadingStatusEl = document.getElementById('loadingStatus');
+        const configErrorEl = document.getElementById('configError');
         const userIdDisplayEl = document.getElementById('userIdDisplay');
         const barcodeInput = document.getElementById('barcodeInput');
         
@@ -199,12 +209,8 @@
                 auth = getAuth(app);
                 db = getFirestore(app);
 
-                // Autenticación: Usa el token provisto o inicia sesión anónimamente
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                // Inicio de sesión anónimo (suficiente para la DB pública 'inventory')
+                await signInAnonymously(auth);
 
                 // Esperar el estado de autenticación
                 onAuthStateChanged(auth, (user) => {
@@ -220,12 +226,15 @@
                     } else {
                         console.error("No se pudo autenticar al usuario.");
                         userIdDisplayEl.textContent = 'Error de Auth.';
+                        loadingStatusEl.textContent = 'Error: No se pudo autenticar.';
+                        loadingStatusEl.classList.replace('bg-yellow-100', 'bg-red-100');
+                        loadingStatusEl.classList.replace('text-yellow-800', 'text-red-800');
                     }
                 });
 
             } catch (error) {
                 console.error("Error al inicializar Firebase:", error);
-                loadingStatusEl.textContent = `Error: ${error.message}`;
+                loadingStatusEl.textContent = `Error: ${error.message}. Verifica las claves.`;
                 loadingStatusEl.classList.replace('bg-yellow-100', 'bg-red-100');
                 loadingStatusEl.classList.replace('text-yellow-800', 'text-red-800');
             }
@@ -235,8 +244,8 @@
          * Establece un listener en tiempo real para el inventario.
          */
         function listenForInventoryChanges() {
-            // Ruta de la colección pública para el inventario de la app
-            const inventoryPath = `artifacts/${appId}/public/data/inventory`;
+            // Usaremos la colección 'inventory'
+            const inventoryPath = `inventory`;
             const inventoryRef = collection(db, inventoryPath);
 
             // onSnapshot mantiene los datos sincronizados en tiempo real
@@ -375,7 +384,8 @@
 
             try {
                 // La ruta de la colección pública y el ID del documento es el código de barras
-                const docRef = doc(db, `artifacts/${appId}/public/data/inventory`, barcode);
+                // Usamos la colección 'inventory'
+                const docRef = doc(db, `inventory`, barcode);
 
                 await setDoc(docRef, {
                     name: name,
